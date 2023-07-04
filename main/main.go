@@ -17,10 +17,14 @@ func main() {
 	var data string
 
 	if err := chromedp.Run(ctx, chromedp.Navigate(url),
-		chromedp.OuterHTML("html", &data, chromedp.ByQuery)); err != nil {
+		readCaptccha(&data)); err != nil {
 		log.Fatal(err)
 	}
 
 	fmt.Print(data)
 
+}
+
+func readCaptccha(captcha *string) chromedp.Action {
+	return chromedp.Text("p#cap > font", captcha, chromedp.NodeVisible, chromedp.ByQuery)
 }
