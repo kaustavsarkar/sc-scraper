@@ -37,6 +37,8 @@ func main() {
 	fromDate := time.Date(1950, time.January, 01, 0, 0, 0, 0, time.UTC)
 	toDate := time.Date(1950, time.December, 31, 0, 0, 0, 0, time.UTC)
 	endDate := time.Date(2024, time.December, 31, 0, 0, 0, 0, time.UTC)
+	retryListTmp := make([]*dates, 0)
+	var retryList []*dates
 
 	for !toDate.Equal(endDate) {
 		fromDateStr := fromDate.Format("02-01-2006")
@@ -47,9 +49,32 @@ func main() {
 		html, err := run(fromDateStr, toDateStr)
 
 		if err != nil {
+			retryListTmp = append(retryListTmp, &dates{startDate: fromDateStr, endDate: toDateStr})
 			log.Printf("there has been an error %v", err)
 		}
 		save(html, fromDateStr)
+	}
+
+	for len(retryListTmp) > 0 {
+		log.Printf("next retry size %v", len(retryListTmp))
+		retryList = make([]*dates, len(retryListTmp))
+		retryList = copy(retryListTmp)
+		retryListTmp = retryListTmp[:0]
+
+		for _, date := range retryList {
+			fromDateStr := date.startDate
+			toDateStr := date.endDate
+			log.Printf("Retry startdate %s endDate %s", fromDateStr, toDateStr)
+
+			html, err := run(fromDateStr, toDateStr)
+
+			if err != nil {
+				retryListTmp = append(retryListTmp, &dates{startDate: fromDateStr, endDate: toDateStr})
+				log.Printf("there has been an error %v", err)
+			}
+			save(html, fromDateStr)
+		}
+
 	}
 }
 
@@ -136,5 +161,13 @@ func save(judgementData, date string) {
 	}
 
 	log.Printf("File saved successfully: %s", filePath)
+}
 
+func copy(src []*dates) []*dates {
+	dest := make([]*dates, 0)
+	for _, date := range src {
+		dest = append(dest, date)
+	}
+	log.Printf("ogt dest %v", dest)
+	return dest
 }
