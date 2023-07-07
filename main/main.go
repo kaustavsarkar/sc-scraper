@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"time"
@@ -10,104 +12,129 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-const url = "https://main.sci.gov.in/judgments"
+const (
+	url                      = "https://main.sci.gov.in/judgments"
+	judgementDayTabSel       = "div#tabbed-nav > ul.z-tabs-desktop > li[data-link=\"tab3\"]"
+	activeJudgementDayTabSel = "li[data-link=\"tab3\"][class=\"z-tab z-active\"]"
+	captchaTextSel           = "p#cap > font"
+	captchaInputSel          = "input#ansCaptcha"
+	fromDateSel              = "input#JBJfrom_date"
+	toDateSel                = "input#JBJto_date"
+	submitBtnSel             = "input#v_getJBJ"
+	loadingSel               = "img[title=\"Loading...\"]"
+	judgementTableSel        = "div#JBJ > table"
+	contentDivSel            = "div#JBJ"
+	basePath                 = "/home/kaustav/work/ain/sc-scraper/output"
+)
+
+type dates struct {
+	startDate string
+	endDate   string
+}
 
 func main() {
-	nctx, ncancel := chromedp.NewExecAllocator(context.Background(), append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("headless", false))...)
-	defer ncancel()
-	ctx, cancel := chromedp.NewContext(nctx)
+
+	fromDate := time.Date(1950, time.January, 01, 0, 0, 0, 0, time.UTC)
+	toDate := time.Date(1950, time.December, 31, 0, 0, 0, 0, time.UTC)
+	endDate := time.Date(2024, time.December, 31, 0, 0, 0, 0, time.UTC)
+
+	for !toDate.Equal(endDate) {
+		fromDateStr := fromDate.Format("02-01-2006")
+		toDateStr := toDate.Format("02-01-2006")
+		log.Printf("startdate %s endDate %s", fromDateStr, toDateStr)
+		fromDate = fromDate.AddDate(1, 0, 0)
+		toDate = toDate.AddDate(1, 0, 0)
+		html, err := run(fromDateStr, toDateStr)
+
+		if err != nil {
+			log.Printf("there has been an error %v", err)
+		}
+		save(html, fromDateStr)
+	}
+}
+
+func run(startDate, endDate string) (string, error) {
+	// nctx, ncancel := chromedp.NewExecAllocator(context.Background(), append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("headless", false))...)
+	// defer ncancel()
+	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
+
 	ctxTimeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
 	defer cancelTimeout()
 
 	var captcha string
-	startDate := "01-01-1950"
-	endDate := "31-12-1950"
-	// var judgementData string
+	// startDate := "01-01-1950"
+	// endDate := "31-12-1950"
+	var judgementData string
 	var buf []byte
 
 	log.Printf("starting date %s end date %s", startDate, endDate)
 
 	if err := chromedp.Run(ctxTimeout, chromedp.Navigate(url),
 		chromedp.WaitReady("body", chromedp.ByQuery),
-		clickOnJudgementDay(),
-		chromedp.WaitVisible("li[data-link=\"tab3\"][class=\"z-tab z-active\"]")); err != nil {
-		log.Fatal(err)
+		chromedp.Click(judgementDayTabSel, chromedp.ByQuery),
+		chromedp.WaitVisible(activeJudgementDayTabSel)); err != nil {
+		return "",
+			fmt.Errorf("errored while selecting the judgement date from years %s . error: %v", startDate, err)
 	}
 
-	if err := chromedp.Run(ctxTimeout, chromedp.WaitVisible("input#ansCaptcha", chromedp.ByQuery),
-		readCaptccha(&captcha),
-		chromedp.Focus("input#ansCaptcha")); err != nil {
+	if err := chromedp.Run(ctxTimeout,
+		chromedp.WaitVisible(captchaInputSel, chromedp.ByQuery),
+		chromedp.Text(captchaTextSel, &captcha, chromedp.NodeVisible, chromedp.ByQuery),
+		chromedp.Focus(captchaInputSel)); err != nil {
+		return "",
+			fmt.Errorf("errored while reading captcha from years %s . error: %v", startDate, err)
+	}
+
+	if err := chromedp.Run(ctxTimeout,
+		chromedp.SendKeys(captchaInputSel, captcha, chromedp.ByQuery),
+		chromedp.Clear(fromDateSel, chromedp.ByQuery),
+		chromedp.SendKeys(fromDateSel, startDate, chromedp.ByQuery),
+		chromedp.Clear(toDateSel, chromedp.ByQuery),
+		chromedp.SendKeys(toDateSel, endDate, chromedp.ByQuery)); err != nil {
+		return "",
+			fmt.Errorf("errored while setting captcha and dates from years %s . error: %v", startDate, err)
+	}
+
+	if err := chromedp.Run(ctxTimeout,
+		chromedp.Click(submitBtnSel, chromedp.ByQuery)); err != nil {
+		return "",
+			fmt.Errorf("errored while clicking on submit button from years %s . error: %v", startDate, err)
+	}
+
+	if err := chromedp.Run(ctxTimeout,
+		chromedp.WaitVisible(loadingSel, chromedp.ByQuery),
+		chromedp.WaitVisible(judgementTableSel, chromedp.ByQuery)); err != nil {
+		log.Fatal(err)
+		return "",
+			fmt.Errorf("errored while waiting for the data to load from years %s . error: %v", startDate, err)
+	}
+
+	if err := chromedp.Run(ctxTimeout,
+		chromedp.InnerHTML(contentDivSel, &judgementData, chromedp.NodeVisible, chromedp.ByQuery)); err != nil {
 		log.Printf("buffer %v", buf)
-		if err := os.WriteFile("fullScreenshot.png", buf, 0o644); err != nil {
-			log.Fatal(err)
-		}
-		log.Fatal(err)
+		errWr := os.WriteFile("fullScreenshot.png", buf, 0o644)
+		err = errors.Join(err, errWr)
+		return "",
+			fmt.Errorf("errored while copying data from years %s . error: %v", startDate, err)
+	}
+	return judgementData, nil
+}
+
+func save(judgementData, date string) {
+	folderPath := basePath + "/" + date
+	if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
+		log.Printf("failed to save html for %s", date)
+		return
+	}
+	filePath := folderPath + "/" + "raw"
+
+	if err := ioutil.WriteFile(filePath, []byte(judgementData), 0644); // Save the file
+	err != nil {
+		log.Printf("Failed to save file: %v", err)
+		return
 	}
 
-	if err := chromedp.Run(ctxTimeout, provideCaptcha(&captcha)); err != nil {
-		log.Printf("buffer %v", buf)
-		if err := os.WriteFile("fullScreenshot.png", buf, 0o644); err != nil {
-			log.Fatal(err)
-		}
-		log.Fatal(err)
-	}
+	log.Printf("File saved successfully: %s", filePath)
 
-	// chromedp.Clear("input#JBJfrom_date", chromedp.ByQuery),
-	// selectStartDate(&startDate),
-	// chromedp.Clear("input#JBJto_date", chromedp.ByQuery),
-	// selectEndDate(&endDate),
-	// waitForLoadingToAppear(),
-	// waitForLoadingToDisappear(),
-	// chromedp.CaptureScreenshot(&buf),
-	// copyJudgementDiv(&judgementData)
-
-	fmt.Print(captcha)
-
-}
-
-func clickOnJudgementDay() chromedp.Action {
-	log.Print("Click on judgement day")
-	return chromedp.Click("div#tabbed-nav > ul.z-tabs-desktop > li[data-link=\"tab3\"]", chromedp.ByQuery)
-}
-
-func readCaptccha(captcha *string) chromedp.Action {
-	log.Print("Reading captcha")
-	return chromedp.Text("p#cap > font", captcha, chromedp.NodeVisible, chromedp.ByQuery)
-}
-
-func provideCaptcha(captcha *string) chromedp.Action {
-	log.Printf("Read captcha %s", *captcha)
-	defer time.Sleep(20 * time.Second)
-	return chromedp.SendKeys("input#ansCaptcha", *captcha, chromedp.ByQuery)
-}
-
-func selectStartDate(date *string) chromedp.Action {
-	log.Printf("Select start time %s", *date)
-	return chromedp.SendKeys("input#JBJfrom_date", *date, chromedp.ByQuery)
-}
-
-func selectEndDate(date *string) chromedp.Action {
-	log.Printf("Select end time %s", *date)
-	return chromedp.SendKeys("input#JBJto_date", *date, chromedp.ByQuery)
-}
-
-func clickOnSubmit() chromedp.Action {
-	log.Printf("Click on submit")
-	return chromedp.Click("input#v_getJBJ", chromedp.ByQuery)
-}
-
-func waitForLoadingToAppear() chromedp.Action {
-	log.Print("Wait for loading to start")
-	return chromedp.WaitVisible("img[title=\"Loading...\"]", chromedp.ByQuery)
-}
-
-func waitForLoadingToDisappear() chromedp.Action {
-	log.Print("Wait for loading to end")
-	return chromedp.WaitNotVisible("img[title=\"Loading...\"]", chromedp.ByQuery)
-}
-
-func copyJudgementDiv(judgementData *string) chromedp.Action {
-	log.Print("Copying judgements")
-	return chromedp.InnerHTML("div#JBJ", judgementData, chromedp.NodeVisible, chromedp.ByQuery)
 }
