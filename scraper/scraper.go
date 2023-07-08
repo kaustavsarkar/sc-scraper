@@ -60,6 +60,7 @@ func ParseHtml(html string) ([]*db.Judgement, error) {
 		s.Next().Find("td:nth-child(3) a").Each(func(i int, js *goquery.Selection) {
 			var jLink db.JudgementLink
 			jLink.Link, _ = js.Attr("href")
+			jLink.Link = "https://main.sci.gov.in/" + jLink.Link
 			anchorText := strings.TrimSpace(js.Text())
 
 			if len(anchorText) > 0 {
