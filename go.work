@@ -3,3 +3,4 @@ go 1.20
 use ./main
 use ./filereader
 use ./db
+use ./scraper
