@@ -2,14 +2,18 @@ package scraper
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/chromedp/chromedp"
+	"sc-scraper.com/db"
 )
 
 const (
@@ -30,6 +34,71 @@ const (
 type dates struct {
 	startDate string
 	endDate   string
+}
+
+var langReplacer = strings.NewReplacer("(", "", ")", "")
+
+func ParseHtml(html string) ([]*db.Judgement, error) {
+	doc, htmlReadErr := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if htmlReadErr != nil {
+		return nil, htmlReadErr
+	}
+	var judgements []*db.Judgement
+	doc.Find("tbody tr:nth-child(9n+1)").Each(func(i int, s *goquery.Selection) {
+		var judgement db.Judgement
+
+		// Diary Number
+		diaryNumber := s.Find("td:nth-child(3)").Text()
+		judgement.DiaryNumber = strings.TrimSpace(diaryNumber)
+
+		// Case Number
+		caseNumber := s.Next().Find("td:nth-child(2)").Text()
+		judgement.CaseNumber = strings.TrimSpace(caseNumber)
+
+		var jLinks []db.JudgementLink
+		// Judgment Day and Links
+		s.Next().Find("td:nth-child(3) a").Each(func(i int, js *goquery.Selection) {
+			var jLink db.JudgementLink
+			jLink.Link, _ = js.Attr("href")
+			anchorText := strings.TrimSpace(js.Text())
+
+			if len(anchorText) > 0 {
+				jLink.Date = strings.TrimSpace(strings.Split(anchorText, "\n")[0])
+			}
+
+			jLink.Lang = langReplacer.Replace(strings.TrimSpace(js.Find("strong").Text()))
+			jLinks = append(jLinks, jLink)
+		})
+		jLinkBytes, _ := json.Marshal(jLinks)
+		judgement.JudgementLinks = string(jLinkBytes)
+
+		// Petitioner Name
+		petitionerName := s.Next().Next().Find("td:nth-child(2)").Text()
+		judgement.PetitionerName = strings.TrimSpace(petitionerName)
+
+		// Respondent Name
+		respondentName := s.Next().Next().Next().Find("td:nth-child(2)").Text()
+		judgement.RespondentName = strings.TrimSpace(respondentName)
+
+		// Petitioner's Advocate
+		petitionerAdvocate := s.Next().Next().Next().Next().Find("td:nth-child(2)").Text()
+		judgement.PetitionerAdvocate = strings.TrimSpace(petitionerAdvocate)
+
+		// Respondent's Advocate
+		respondentAdvocate := s.Next().Next().Next().Next().Next().Find("td:nth-child(2)").Text()
+		judgement.RespondentAdvocate = strings.TrimSpace(respondentAdvocate)
+
+		// Bench
+		bench := s.Next().Next().Next().Next().Next().Next().Find("td:nth-child(2)").Text()
+		judgement.Bench = strings.TrimSpace(bench)
+
+		// Judgment By
+		judgementBy := s.Next().Next().Next().Next().Next().Next().Next().Find("td:nth-child(2)").Text()
+		judgement.JudgementBy = strings.TrimSpace(judgementBy)
+
+		judgements = append(judgements, &judgement)
+	})
+	return judgements, nil
 }
 
 func ScrapeAll() {

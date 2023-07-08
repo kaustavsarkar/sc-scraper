@@ -2,10 +2,17 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+type JudgementLink struct {
+	Link string `json:"link"`
+	Date string `json:"date"`
+	Lang string `json:"lang"`
+}
 
 type Judgement struct {
 	DiaryNumber        string
@@ -35,9 +42,7 @@ func Open() (*sql.DB, error) {
 		RespondentAdvocate TEXT,
 		Bench TEXT,
 		JudgementBy TEXT,
-		JudgementLinks TEXT,
-
-
+		JudgementLinks TEXT
 	)
 	`
 	if _, execErr := db.Exec(createTableSql); execErr != nil {
@@ -51,16 +56,18 @@ func Close(db *sql.DB) error {
 	return db.Close()
 }
 
-func (j *Judgement) Insert(db *sql.DB) error {
-	stmt, prepErr := db.Prepare("INSERT INTO judgements(DiaryNumber, CaseNumber, PetitionerName, RespondentName, PetitionerAdvocate, RespondentAdvocate, Bench, JudgementBy, JudgementLinks)")
+func (j *Judgement) Insert(db *sql.DB, txn *sql.Tx) error {
+	stmt, prepErr := txn.Prepare("INSERT INTO judgements(DiaryNumber, CaseNumber, PetitionerName, RespondentName, PetitionerAdvocate, RespondentAdvocate, Bench, JudgementBy, JudgementLinks) VALUES (?,?,?,?,?,?,?,?,?)")
 	if prepErr != nil {
 		return prepErr
 	}
 	defer stmt.Close()
 
+	jLinkByte, _ := json.Marshal(j.JudgementLinks)
+
 	_, execErr := stmt.Exec(j.DiaryNumber, j.CaseNumber, j.PetitionerName,
 		j.RespondentName, j.PetitionerAdvocate, j.RespondentAdvocate, j.Bench,
-		j.JudgementBy, j.JudgementLinks)
+		j.JudgementBy, string(jLinkByte))
 	if execErr != nil {
 		return prepErr
 	}
