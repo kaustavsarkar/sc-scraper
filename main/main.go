@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"sc-scraper.com/db"
@@ -12,7 +13,7 @@ import (
 	"sc-scraper.com/scraper"
 )
 
-const root = "/home/kaustav/work/ain/sc-scraper/output"
+const root = "/home/kaustav/work/ain/sc-scraper/_output"
 
 func main() {
 	// scraper.ScrapeAll()
@@ -76,42 +77,61 @@ func downloadAndSave() {
 		log.Fatal(readErr)
 	}
 
+	// Set the maximum number of concurrent downloads
+	maxConurrency := 20
+
+	// Create a wait group to ensure all downloads complete before exiting
+	var wg sync.WaitGroup
+	wg.Add(len(judgements))
+
+	// Create a channel to control the number of concurrent downloads
+	semaphore := make(chan struct{}, maxConurrency)
+
 	for _, judgement := range judgements {
-		jsonString := strings.ReplaceAll(strings.Trim(judgement.JudgementLinks, `"`), "\\\"", "\"")
-		var judgementLinks []db.JudgementLink
-		unMarshalErr := json.Unmarshal([]byte(jsonString), &judgementLinks)
-		if unMarshalErr != nil {
-			log.Print([]byte(jsonString))
-			log.Fatalf("err: %v string %v", unMarshalErr, jsonString)
-			return
-		}
-		var date string
-		for _, l := range judgementLinks {
-			if len(l.Date) <= 0 {
-				continue
+		// Acquire a token from the semaphore, allowing a limited number of concurrent downloads
+		semaphore <- struct{}{}
+
+		go func(judgement db.Judgement) {
+			jsonString := strings.ReplaceAll(strings.Trim(judgement.JudgementLinks, `"`), "\\\"", "\"")
+			var judgementLinks []db.JudgementLink
+			unMarshalErr := json.Unmarshal([]byte(jsonString), &judgementLinks)
+			if unMarshalErr != nil {
+				log.Print([]byte(jsonString))
+				log.Fatalf("err: %v string %v", unMarshalErr, jsonString)
+				return
+			}
+			var date string
+			for _, l := range judgementLinks {
+				if len(l.Date) <= 0 {
+					continue
+				}
+
+				hasSpace := strings.Contains(l.Date, " ")
+				var dString string
+
+				if hasSpace {
+					dString = strings.Split(l.Date, " ")[0]
+				} else {
+					dString = l.Date
+				}
+
+				d, err := parseDate(dString)
+				if err == nil {
+					date = "01-01-" + fmt.Sprint(d.Year())
+				}
 			}
 
-			hasSpace := strings.Contains(l.Date, " ")
-			var dString string
-
-			if hasSpace {
-				dString = strings.Split(l.Date, " ")[0]
-			} else {
-				dString = l.Date
+			for _, l := range judgementLinks {
+				filePath := root + "/" + date + "/"
+				log.Printf("%s", l.Link)
+				scraper.DownloadPdf(l, filePath)
 			}
 
-			d, err := parseDate(dString)
-			if err == nil {
-				date = "01-01-" + fmt.Sprint(d.Year())
-			}
-		}
+			// Release the token back to the semaphore
+			<-semaphore
+		}(*judgement)
 
-		for _, l := range judgementLinks {
-			filePath := root + "/" + date + "/"
-			log.Printf("%s", l.Link)
-			scraper.DownloadPdf(l, filePath)
-		}
-
+		wg.Done()
 	}
 }
 
