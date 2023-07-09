@@ -9,9 +9,9 @@ import (
 )
 
 type JudgementLink struct {
-	Link string `json:"link"`
-	Date string `json:"date"`
-	Lang string `json:"lang"`
+	Link string `json:"link,omitempty"`
+	Date string `json:"date,omitempty"`
+	Lang string `json:"lang,omitempty"`
 }
 
 type Judgement struct {
@@ -74,7 +74,7 @@ func (j *Judgement) Insert(db *sql.DB, txn *sql.Tx) error {
 	return nil
 }
 
-func (j *Judgement) ReadAll(db *sql.DB) ([]*Judgement, error) {
+func ReadAll(db *sql.DB) ([]*Judgement, error) {
 	selectQuery := "SELECT * FROM judgements"
 	rows, qErr := db.Query(selectQuery)
 	if qErr != nil {

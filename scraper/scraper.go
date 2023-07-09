@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,7 +21,7 @@ import (
 )
 
 const (
-	url                      = "https://main.sci.gov.in/judgments"
+	scjUrl                   = "https://main.sci.gov.in/judgments"
 	judgementDayTabSel       = "div#tabbed-nav > ul.z-tabs-desktop > li[data-link=\"tab3\"]"
 	activeJudgementDayTabSel = "li[data-link=\"tab3\"][class=\"z-tab z-active\"]"
 	captchaTextSel           = "p#cap > font"
@@ -37,6 +41,41 @@ type dates struct {
 }
 
 var langReplacer = strings.NewReplacer("(", "", ")", "")
+
+func DownloadPdf(links db.JudgementLink, path string) error {
+	pdfUrl := links.Link
+	// Send GET request to the URL
+	resp, err := http.Get(pdfUrl)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Check if the response is a PDF file
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "application/pdf") {
+		return fmt.Errorf("URL does not point to a PDF file")
+	}
+
+	// Create the output file
+	u, err := url.Parse(pdfUrl)
+	fileName := filepath.Base(u.Path)
+	path = path + links.Date + "_" + fileName
+	log.Print(path)
+	out, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	// Copy the response body to the output file
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
 
 func ParseHtml(html string) ([]*db.Judgement, error) {
 	doc, htmlReadErr := goquery.NewDocumentFromReader(strings.NewReader(html))
@@ -164,7 +203,7 @@ func run(startDate, endDate string) (string, error) {
 
 	log.Printf("starting date %s end date %s", startDate, endDate)
 
-	if err := chromedp.Run(ctxTimeout, chromedp.Navigate(url),
+	if err := chromedp.Run(ctxTimeout, chromedp.Navigate(scjUrl),
 		chromedp.WaitReady("body", chromedp.ByQuery),
 		chromedp.Click(judgementDayTabSel, chromedp.ByQuery),
 		chromedp.WaitVisible(activeJudgementDayTabSel)); err != nil {
