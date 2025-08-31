@@ -1,0 +1,24 @@
+[project]
+name = "sc-scraper"
+version = "0.1.0"
+description = "Scrapper for Indian Statutes"
+authors = [
+    {name = "Kaustav Sarkar"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "requests>=2.32.5,<3.0.0",
+    "beautifulsoup4>=4.13.5,<5.0.0",
+    "pandas>=2.3.2,<3.0.0"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+black = "^25.1.0"
+flake8 = "^7.3.0"
+
